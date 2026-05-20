@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { useWallet } from '@/hooks/useWallet';
+import { getApiBase } from '@/lib/apiBase';
 
 type StoredTx = {
   hash: string;
@@ -11,7 +12,7 @@ type StoredTx = {
 };
 
 const TX_STORAGE_KEY = 'puffer_tx_history';
-const API = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080/api';
+const API = getApiBase();
 
 export default function HistoryPage() {
   const { address, pufEthBalance } = useWallet();

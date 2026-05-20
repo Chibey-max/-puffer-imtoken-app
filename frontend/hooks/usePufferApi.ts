@@ -1,7 +1,8 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { getApiBase } from '@/lib/apiBase';
 
-const API = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080/api';
+const API = getApiBase();
 
 const RATE_TTL = 30_000;
 const VAULT_TTL = 60_000;

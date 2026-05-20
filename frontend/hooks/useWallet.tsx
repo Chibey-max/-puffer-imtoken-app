@@ -61,6 +61,26 @@ function getInjectedProviders(): InjectedProvider[] {
   return [eth];
 }
 
+function friendlyWalletError(err: unknown): string {
+  const raw = err as { code?: number; message?: string; shortMessage?: string };
+  const msg = (raw?.shortMessage || raw?.message || '').toLowerCase();
+
+  if (raw?.code === 4001 || msg.includes('rejected')) {
+    return 'Request was rejected in wallet.';
+  }
+  if (msg.includes('http client error') || msg.includes('403') || msg.includes('rpc endpoint returned')) {
+    return 'Wallet RPC provider is unavailable for this network right now. Please switch network again or change wallet RPC endpoint.';
+  }
+  if (msg.includes('failed to fetch') || msg.includes('network error')) {
+    return 'Network error while contacting wallet RPC. Check internet and retry.';
+  }
+  if (msg.includes('unknown error') || msg.includes('unknown rpc error')) {
+    return 'Wallet returned an unknown RPC error. Please retry in a few seconds.';
+  }
+
+  return raw?.shortMessage || raw?.message || 'Wallet request failed';
+}
+
 function useWalletController(): WalletContextValue {
   const [state, setState] = useState<WalletState>({
     address: null,
@@ -103,6 +123,7 @@ function useWalletController(): WalletContextValue {
     } catch {
       // ignore storage errors
     }
+
     const available = getInjectedProviders();
     if (!available.length) {
       setState(s => ({ ...s, error: 'No wallet detected. Install or open any EVM wallet extension/app (Rabby, MetaMask, Coinbase, Trust, imToken).' }));
@@ -127,9 +148,7 @@ function useWalletController(): WalletContextValue {
       const chainId = (await selected.request({ method: 'eth_chainId' })) as string;
       const address = accounts[0];
 
-      if (!address) {
-        throw new Error('No account returned by wallet. Please unlock wallet and retry.');
-      }
+      if (!address) throw new Error('No account returned by wallet. Please unlock wallet and retry.');
 
       setState(s => ({ ...s, address, chainId, isConnecting: false }));
       await fetchBalanceInternal(address, selected);
@@ -138,14 +157,13 @@ function useWalletController(): WalletContextValue {
         setState(s => ({ ...s, error: `Please switch to ${TARGET_NETWORK_NAME}.` }));
       }
     } catch (err: unknown) {
-      const anyErr = err as { code?: number; message?: string };
+      const anyErr = err as { code?: number };
       if (anyErr?.code === 4001) {
         setState(s => ({ ...s, isConnecting: false, error: 'Connection request was rejected in wallet.' }));
         return;
       }
 
-      const message = err instanceof Error ? err.message : 'Connection failed';
-      setState(s => ({ ...s, isConnecting: false, error: message }));
+      setState(s => ({ ...s, isConnecting: false, error: friendlyWalletError(err) }));
     }
   }, [fetchBalanceInternal]);
 
@@ -163,6 +181,9 @@ function useWalletController(): WalletContextValue {
   const switchToMainnet = useCallback(async () => {
     const provider = activeProvider || (window.ethereum as InjectedProvider | undefined);
     if (!provider) return;
+
+    const isHolesky = MAINNET_CHAIN_ID.toLowerCase() === '0x4268';
+
     try {
       await provider.request({
         method: 'wallet_switchEthereumChain',
@@ -171,8 +192,39 @@ function useWalletController(): WalletContextValue {
       setState(s => ({ ...s, error: null, chainId: MAINNET_CHAIN_ID }));
       if (state.address) await fetchBalanceInternal(state.address, provider);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to switch network';
-      setState(s => ({ ...s, error: message }));
+      const raw = err as { code?: number };
+
+      if (raw?.code === 4902) {
+        try {
+          const addParams = isHolesky
+            ? {
+                chainId: '0x4268',
+                chainName: 'Holesky',
+                nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+                rpcUrls: ['https://ethereum-holesky-rpc.publicnode.com'],
+                blockExplorerUrls: ['https://holesky.etherscan.io'],
+              }
+            : {
+                chainId: '0xaa36a7',
+                chainName: 'Sepolia',
+                nativeCurrency: { name: 'Sepolia Ether', symbol: 'ETH', decimals: 18 },
+                rpcUrls: ['https://ethereum-sepolia-rpc.publicnode.com'],
+                blockExplorerUrls: ['https://sepolia.etherscan.io'],
+              };
+
+          await provider.request({ method: 'wallet_addEthereumChain', params: [addParams] });
+          await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: MAINNET_CHAIN_ID }] });
+
+          setState(s => ({ ...s, error: null, chainId: MAINNET_CHAIN_ID }));
+          if (state.address) await fetchBalanceInternal(state.address, provider);
+          return;
+        } catch (addErr: unknown) {
+          setState(s => ({ ...s, error: friendlyWalletError(addErr) }));
+          return;
+        }
+      }
+
+      setState(s => ({ ...s, error: friendlyWalletError(err) }));
     }
   }, [activeProvider, fetchBalanceInternal, state.address]);
 

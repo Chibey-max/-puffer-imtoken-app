@@ -1,11 +1,12 @@
 'use client';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { parseEther, formatEther, BrowserProvider, Eip1193Provider } from 'ethers';
 import { useWallet } from '@/hooks/useWallet';
 import { usePufferClient } from '@/hooks/usePufferClient';
 import { usePufETHRate } from '@/hooks/usePufferApi';
 import TxFeedback, { TxStatus } from './TxFeedback';
-import { TARGET_NETWORK_NAME, isPufferStakingSupportedChain } from '@/lib/network';
+import { SUBMISSION_MODE, TARGET_NETWORK_NAME, isPufferStakingSupportedChain } from '@/lib/network';
+import { getApiBase } from '@/lib/apiBase';
 
 const TOKENS = ['ETH', 'stETH', 'wstETH'] as const;
 type Token = typeof TOKENS[number];
@@ -19,8 +20,8 @@ type StoredTx = {
 };
 
 const TX_STORAGE_KEY = 'puffer_tx_history';
-const API = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080/api';
-const SIMULATE_STAKE = process.env.NEXT_PUBLIC_SIMULATE_STAKE === 'true';
+const API = getApiBase();
+const SIMULATE_STAKE = process.env.NEXT_PUBLIC_SIMULATE_STAKE === 'true' && !SUBMISSION_MODE;
 
 function saveTx(tx: StoredTx) {
   if (typeof window === 'undefined') return;
@@ -84,6 +85,25 @@ export default function StakeForm() {
 
   const executeStake = async () => {
     if (!address || !amount || !isMainnet) return;
+
+    // Prevent wallet-level generic RPC failures by checking obvious insufficient balance first
+    if (token === 'ETH') {
+      const requested = Number(amount);
+      const balance = Number(ethBalance || '0');
+      const minGasReserve = 0.0002;
+
+      if (!Number.isFinite(requested) || requested <= 0) {
+        setTxError('Enter a valid stake amount.');
+        setStatus('error');
+        return;
+      }
+
+      if (!Number.isFinite(balance) || balance <= 0 || requested + minGasReserve > balance) {
+        setTxError(`Insufficient ETH. You need stake amount + gas reserve (~${minGasReserve} ETH). Current wallet balance is ${balance.toFixed(6)} ETH.`);
+        setStatus('error');
+        return;
+      }
+    }
 
     setStatus('preparing');
     setTxHash(undefined);
@@ -160,13 +180,18 @@ export default function StakeForm() {
       }
     } catch (err: unknown) {
       const raw = err as { code?: number; shortMessage?: string; message?: string };
+      const msg = (raw?.shortMessage || raw?.message || '').toLowerCase();
 
-      if (raw?.code === 4001 || (raw?.message && raw.message.toLowerCase().includes('rejected'))) {
+      if (raw?.code === 4001 || msg.includes('rejected')) {
         setTxError('Transaction cancelled in wallet. No funds moved.');
+      } else if (msg.includes('unknown rpc error') || msg.includes('rpc error') || msg.includes('internal json-rpc error')) {
+        setTxError('Wallet RPC error after signing. On Holesky this is usually temporary RPC/provider instability or unsupported contract path. Retry in 10–20s, then try a smaller amount.');
+      } else if (msg.includes('insufficient funds')) {
+        setTxError('Insufficient ETH for value + gas. Keep extra Holesky ETH for fees and retry with a smaller amount.');
       } else if (raw?.shortMessage) {
         setTxError(raw.shortMessage);
       } else if (raw?.message) {
-        setTxError(raw.message.length > 160 ? `${raw.message.slice(0, 160)}…` : raw.message);
+        setTxError(raw.message.length > 220 ? `${raw.message.slice(0, 220)}…` : raw.message);
       } else {
         setTxError('Transaction failed. Please try again.');
       }
@@ -179,6 +204,15 @@ export default function StakeForm() {
     if (!amount || parseFloat(amount) <= 0 || !isMainnet) return;
     setShowConfirm(true);
   };
+
+  useEffect(() => {
+    if (!showConfirm) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [showConfirm]);
 
   const reset = () => {
     setStatus('idle');
@@ -231,11 +265,11 @@ export default function StakeForm() {
     <div className="space-y-4">
       {SIMULATE_STAKE && (
         <div className="bg-amber-950/30 border border-amber-500/30 rounded-xl p-3">
-          <p className="text-xs text-amber-300 font-semibold">Simulation mode enabled</p>
+          <p className="text-xs text-amber-300 font-semibold">Simulation mode enabled (non-submission)</p>
           <p className="text-xs text-[#8892a4] mt-1">Staking confirmations are mocked for demo/testing. No on-chain transaction is submitted.</p>
         </div>
       )}
-      <div className="flex gap-2 card-animate">
+      <div className="flex gap-2 card-animate dex-card p-2 rounded-xl">
         {TOKENS.map(t => (
           <button
             key={t}
@@ -251,7 +285,7 @@ export default function StakeForm() {
         ))}
       </div>
 
-      <div className="bg-[#0d1525] border border-[#1a2535] rounded-xl p-4 card-animate">
+      <div className="dex-card rounded-xl p-4 card-animate">
         <div className="flex justify-between mb-2">
           <label className="text-xs text-[#8892a4]">Amount ({token})</label>
           {token === 'ETH' && ethBalance && (
@@ -274,7 +308,7 @@ export default function StakeForm() {
       </div>
 
       {estimatedPufETH && (
-        <div className="bg-[#001a2e] border border-[#00d4ff]/20 rounded-xl p-4 space-y-2 card-animate">
+        <div className="dex-card rounded-xl p-4 space-y-2 card-animate">
           <div className="flex justify-between text-sm">
             <span className="text-[#8892a4]">You will receive ~</span>
             <span className="font-mono font-bold text-[#00d4ff]">{estimatedPufETH} pufETH</span>
@@ -289,7 +323,7 @@ export default function StakeForm() {
               <span className="font-mono text-[#8892a4]">~{parseFloat(gasEstimate).toFixed(6)} ETH</span>
             </div>
           )}
-          <p className="text-xs text-[#8892a4] pt-1 border-t border-[#1a2535]">
+          <p className="text-xs text-[#8ea0bc] pt-1 border-t border-[#2a3a52]">
             Rate updates every block. Final amount may vary slightly.
           </p>
         </div>
@@ -306,8 +340,8 @@ export default function StakeForm() {
       </button>
 
       {showConfirm && (
-        <div className="fixed inset-0 z-[60] bg-black/65 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="w-full max-w-md bg-[#0d1525] border border-[#1a2535] rounded-2xl p-4 space-y-4 card-animate">
+        <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-md flex items-center justify-center px-4 pt-24 pb-[calc(7rem+env(safe-area-inset-bottom))] sm:pt-4 sm:pb-4 overflow-y-auto overscroll-contain">
+          <div className="w-full max-w-md max-h-[82vh] overflow-y-auto overscroll-contain dex-card rounded-2xl p-4 space-y-4 card-animate">
             <div>
               <p className="text-xs text-[#8892a4] uppercase tracking-wider">Security confirmation</p>
               <h3 className="text-lg font-bold text-white mt-1">Review before signing</h3>
@@ -320,7 +354,7 @@ export default function StakeForm() {
               {gasEstimate && <div className="flex justify-between"><span className="text-[#8892a4]">Est. Gas</span><span className="text-white">~{parseFloat(gasEstimate).toFixed(6)} ETH</span></div>}
             </div>
 
-            <ul className="text-xs text-[#8892a4] space-y-1.5">
+            <ul className="text-xs text-[#8ea0bc] space-y-1.5 leading-relaxed">
               <li>• Verify token and amount in your wallet prompt.</li>
               <li>• Confirm destination contract and network are correct.</li>
               <li>• Never sign unexpected approval/permit requests.</li>

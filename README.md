@@ -65,9 +65,13 @@ docker compose up --build
 
 | Variable | Service | Description |
 |---|---|---|
-| `NEXT_PUBLIC_BACKEND_URL` | Frontend | Backend API base URL |
-| `NEXT_PUBLIC_RPC_URL` | Frontend | Ethereum RPC endpoint |
-| `BACKEND_URL` | Frontend (SSR) | Internal backend URL |
+| `NEXT_PUBLIC_BACKEND_URL` | Frontend | Backend API base URL (set this in production; example `https://your-backend.com/api`) |
+| `NEXT_PUBLIC_RPC_URL` | Frontend | RPC endpoint (default: Holesky public RPC) |
+| `NEXT_PUBLIC_CHAIN_ID` | Frontend | Target chain id (default: `0x4268` Holesky) |
+| `NEXT_PUBLIC_NETWORK_NAME` | Frontend | Target network label (default: `Holesky`) |
+| `NEXT_PUBLIC_SIMULATE_STAKE` | Frontend | Demo-only simulated stake mode (`true/false`) |
+| `NEXT_PUBLIC_SUBMISSION_MODE` | Frontend | Submission mode (`true` disables simulation automatically) |
+| `BACKEND_URL` | Frontend (SSR rewrite) | Internal backend URL for Next.js `/api/*` rewrite |
 | `PORT` | Backend | Server port (default 8080) |
 | `FRONTEND_URL` | Backend | CORS allowed origin |
 
@@ -81,18 +85,21 @@ docker compose up --build
 | `/stake` | Stake ETH / stETH / wstETH → pufETH |
 | `/vaults` | UniFi vault listings with live APY + TVL |
 | `/vaults/[id]` | Vault detail page |
+| `/swap` | Aggregator quote/swap with optional auto-stake to pufETH |
+| `/security` | Security center + challenge coverage checklist |
 | `/history` | Transaction history (wallet-linked) |
 
 ---
 
-## Key Contracts (Ethereum Mainnet)
+## Key Contracts
 
 | Contract | Address |
 |---|---|
-| PufferVault | `0xD9A442856C234a39a81a089C06451EBAa4306a72` |
 | pufETH | `0xd9a442856c234a39a81a089c06451ebaa4306a72` |
 | stETH | `0xae7ab96520de3a18e5e111b5eaab095312d7fe84` |
 | wstETH | `0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0` |
+
+> For submission, use a chain where staking path is supported (default app target is Holesky).
 
 ---
 
@@ -123,10 +130,11 @@ chore(docker): add health check to backend service
 - ✅ **Secure staking UX**: network gating (Ethereum mainnet only), transaction lifecycle states, and explorer verification links
 
 ### Advanced challenge status
-- 🚧 DEX aggregator (any token → ETH → pufETH): beta integrated (`/swap`) with live quote estimation + DEX handoff, seamless one-click execution flow in progress
+- ✅ DEX aggregator path implemented on supported routes/networks (`/swap`) with quote → swap execution + optional auto-stake to pufETH
+- ℹ️ Availability depends on network liquidity/aggregator support for the selected token pair
 
 ## Security and UX safeguards
-- Mainnet-only staking guardrail with one-tap network switch request
+- Network guardrail enforces configured target network with one-tap switch request
 - Graceful backend outage handling (non-blocking live-data warning banner)
 - Transaction state machine: prepare → wallet signature → submitted → confirmed/error
 - Local + backend-persisted transaction history with Etherscan verification links
@@ -140,9 +148,52 @@ chore(docker): add health check to backend service
 5. Open `Vaults` and inspect APY/TVL + detail pages
 6. Open `History` to view persisted transaction timeline (local + backend store)
 
+## Submission Mode (judge-ready)
+
+Use these frontend env values for final judging:
+
+```bash
+NEXT_PUBLIC_BACKEND_URL=https://your-backend-domain.com/api
+NEXT_PUBLIC_CHAIN_ID=0x4268
+NEXT_PUBLIC_NETWORK_NAME=Holesky
+NEXT_PUBLIC_RPC_URL=https://ethereum-holesky-rpc.publicnode.com
+NEXT_PUBLIC_SIMULATE_STAKE=false
+NEXT_PUBLIC_SUBMISSION_MODE=true
+NEXT_PUBLIC_SHOW_SUBMISSION_STATUS=false
+```
+
+- `NEXT_PUBLIC_SUBMISSION_MODE=true` automatically disables simulated staking even if `NEXT_PUBLIC_SIMULATE_STAKE=true` by mistake.
+- This ensures real transaction flow on supported networks.
+
+## Deployment (mobile testing)
+
+### Recommended split deploy
+1. Deploy `backend/` to Render/Railway/Fly (Express long-running server).
+2. Deploy `frontend/` to Vercel (Root Directory = `frontend`).
+3. Set frontend env `NEXT_PUBLIC_BACKEND_URL` to your backend `/api` URL.
+4. Set backend env `FRONTEND_URL` to your frontend domain for CORS.
+
+### Vercel frontend settings
+- Framework: Next.js
+- Root Directory: `frontend`
+- Build command: `npm run build`
+- Output: default Next.js
+
+### Backend minimum env
+```bash
+PORT=8080
+FRONTEND_URL=https://your-frontend.vercel.app
+```
+
+### Quick mobile validation checklist
+- Open deployed URL on phone/imToken browser.
+- Confirm `/api/health` banner is not showing repeated failures.
+- Complete one stake flow and verify Etherscan link.
+- Complete one swap route (or observe graceful no-liquidity fallback).
+
 ## Hackathon Submission
 
 - **Base challenge:** ✅ Complete
-- **Advanced challenge:** 🚧 In progress (beta shipped at `/swap`; seamless one-click execution in progress)
+- **Advanced challenge:** ✅ Implemented for supported routes/networks (with clear runtime guardrails)
 
 Built for the imToken 10th Anniversary AI Co-Creation Campaign.

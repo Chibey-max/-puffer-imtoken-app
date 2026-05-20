@@ -12,7 +12,7 @@ function resolvePufferChain(): Chain {
   return Chain.Holesky;
 }
 
-export function createPufferClient(rpcUrl: string): PufferClient {
+export function createPufferClient(rpcUrls: string[]): PufferClient {
   if (!window.ethereum) throw new Error('No injected wallet found');
 
   const chain = resolvePufferChain();
@@ -24,7 +24,7 @@ export function createPufferClient(rpcUrl: string): PufferClient {
 
   const publicClient = PufferClientHelpers.createPublicClient({
     chain,
-    rpcUrls: [rpcUrl],
+    rpcUrls,
   });
 
   pufferClientInstance = new PufferClient(chain, walletClient, publicClient);

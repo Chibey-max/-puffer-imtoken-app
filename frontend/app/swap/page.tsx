@@ -41,6 +41,7 @@ const RECENT_SWAPS_KEY = 'puffer_recent_swaps';
 const ETH_SENTINEL = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 const PARASWAP_BASE = 'https://apiv5.paraswap.io';
 const STAKE_GAS_BUFFER_WEI = parseEther('0.00015');
+const STAKE_GAS_BUFFER_ETH_LABEL = formatEther(STAKE_GAS_BUFFER_WEI);
 
 export default function SwapPage() {
   const { address, isMainnet, connect, switchToMainnet } = useWallet();
@@ -58,6 +59,9 @@ export default function SwapPage() {
   const [slippage, setSlippage] = useState('1.0');
   const [recentSwaps, setRecentSwaps] = useState<RecentSwap[]>([]);
   const [autoStake, setAutoStake] = useState(true);
+  const [stakeMinRequiredWei, setStakeMinRequiredWei] = useState<bigint | null>(null);
+  const [swapTxHash, setSwapTxHash] = useState<string | null>(null);
+  const [stakeTxHash, setStakeTxHash] = useState<string | null>(null);
 
   const isEthInput = token.symbol === 'ETH';
   const pufferClient = client || init();
@@ -80,6 +84,20 @@ export default function SwapPage() {
       return null;
     }
   }, [amount, token.decimals]);
+
+  const normalizeSwapError = (rawMessage: string): string => {
+    const msg = rawMessage.toLowerCase();
+    if (msg.includes('insufficient liquidity') || msg.includes('no route') || msg.includes('price route')) {
+      return `No swap route found for this pair/size right now. Try a smaller amount or another token.`;
+    }
+    if (msg.includes('429') || msg.includes('rate limit')) {
+      return 'Quote service is rate-limited. Please retry in a few seconds.';
+    }
+    if (msg.includes('network') || msg.includes('rpc') || msg.includes('failed to fetch')) {
+      return 'Network/RPC issue while fetching quote. Please retry.';
+    }
+    return rawMessage;
+  };
 
   useEffect(() => {
     const run = async () => {
@@ -115,7 +133,8 @@ export default function SwapPage() {
         }
         setPriceRoute(json.priceRoute as PriceRoute);
       } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : 'Failed to fetch quote');
+        const message = e instanceof Error ? e.message : 'Failed to fetch quote';
+        setError(normalizeSwapError(message));
       } finally {
         setLoadingQuote(false);
       }
@@ -151,6 +170,16 @@ export default function SwapPage() {
     return estimatedPufEth / inputAmount;
   }, [amount, estimatedPufEth]);
 
+  const inputAmountWei = srcAmountBase ? BigInt(srcAmountBase) : null;
+
+  const insufficientEthForAutoStake = autoStake
+    && isEthInput
+    && !!inputAmountWei
+    && !!stakeMinRequiredWei
+    && inputAmountWei < stakeMinRequiredWei;
+
+  const stakeMinRequiredEthLabel = stakeMinRequiredWei ? formatEther(stakeMinRequiredWei) : null;
+
   const saveRecentSwap = (hash?: string) => {
     if (!amount || !estimatedEth) return;
     const item: RecentSwap = {
@@ -164,6 +193,46 @@ export default function SwapPage() {
     window.localStorage.setItem(RECENT_SWAPS_KEY, JSON.stringify(next));
   };
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const estimateStakeMinimum = async () => {
+      if (!autoStake || !isEthInput || !address || !window.ethereum || !pufferClient) {
+        if (!cancelled) setStakeMinRequiredWei(null);
+        return;
+      }
+
+      try {
+        const provider = new BrowserProvider(window.ethereum as Eip1193Provider);
+        const signer = await provider.getSigner();
+        const owner = await signer.getAddress();
+
+        const feeData = await provider.getFeeData();
+        const gasPrice = feeData.maxFeePerGas || feeData.gasPrice;
+        if (!gasPrice || gasPrice <= BigInt(0)) {
+          if (!cancelled) setStakeMinRequiredWei(STAKE_GAS_BUFFER_WEI);
+          return;
+        }
+
+        const { estimate } = pufferClient.vault.depositETH(owner as `0x${string}`);
+        const estimatedGasUnits = await estimate();
+        const gasCostWei = estimatedGasUnits * gasPrice;
+
+        // Reserve base gas buffer + one full stake tx gas cost.
+        const required = STAKE_GAS_BUFFER_WEI + gasCostWei;
+        if (!cancelled) setStakeMinRequiredWei(required);
+      } catch {
+        if (!cancelled) setStakeMinRequiredWei(STAKE_GAS_BUFFER_WEI);
+      }
+    };
+
+    estimateStakeMinimum();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [autoStake, isEthInput, address, pufferClient]);
+
   const executeSwap = async () => {
     if (!address) return setError('Connect wallet first');
     if (!isMainnet) return setError(`Switch to ${TARGET_NETWORK_NAME} first`);
@@ -172,6 +241,8 @@ export default function SwapPage() {
 
     setSwapping(true);
     setError(null);
+    setSwapTxHash(null);
+    setStakeTxHash(null);
 
     try {
       const provider = new BrowserProvider(window.ethereum as Eip1193Provider);
@@ -242,6 +313,7 @@ export default function SwapPage() {
         });
 
         setStatus(`Swap submitted: ${sent.hash}`);
+        setSwapTxHash(sent.hash);
         saveRecentSwap(sent.hash);
         const receipt = await sent.wait(1);
         if (!receipt) throw new Error('Swap confirmation not received');
@@ -264,12 +336,17 @@ export default function SwapPage() {
 
       const stakeAmountWei = ethToStakeWei > STAKE_GAS_BUFFER_WEI ? ethToStakeWei - STAKE_GAS_BUFFER_WEI : BigInt(0);
       if (stakeAmountWei <= BigInt(0)) {
+        if (isEthInput) {
+          const minLabel = stakeMinRequiredEthLabel || STAKE_GAS_BUFFER_ETH_LABEL;
+          throw new Error(`ETH amount too small for auto-stake. Enter at least ${minLabel} ETH to cover gas + buffer.`);
+        }
         throw new Error('Not enough ETH after swap to cover stake transaction gas buffer.');
       }
 
       setStatus('Awaiting wallet signature for pufETH mint (stake)…');
       const { transact } = pufferClient.vault.depositETH(owner as `0x${string}`);
       const stakeHash = await transact(stakeAmountWei);
+      setStakeTxHash(stakeHash);
       setStatus(`Stake submitted: ${stakeHash}`);
 
       const stakeReceipt = await provider.waitForTransaction(stakeHash, 1, 120_000);
@@ -281,12 +358,17 @@ export default function SwapPage() {
     } catch (e: unknown) {
       const raw = e as { code?: number; shortMessage?: string; message?: string };
 
+      const lowMsg = (raw?.shortMessage || raw?.message || '').toLowerCase();
       if (raw?.code === 4001 || (raw?.message && raw.message.toLowerCase().includes('rejected'))) {
         setError('Transaction cancelled in wallet. No funds moved.');
+      } else if (lowMsg.includes('insufficient funds') || lowMsg.includes('gas * price + value') || lowMsg.includes('intrinsic gas too low')) {
+        const minLabel = stakeMinRequiredEthLabel || STAKE_GAS_BUFFER_ETH_LABEL;
+        setError(`Insufficient ETH for stake value + network gas. Increase input amount (about ${minLabel} ETH minimum in current conditions).`);
       } else if (raw?.shortMessage) {
-        setError(raw.shortMessage);
+        setError(normalizeSwapError(raw.shortMessage));
       } else if (raw?.message) {
-        setError(raw.message.length > 180 ? `${raw.message.slice(0, 180)}…` : raw.message);
+        const trimmed = raw.message.length > 180 ? `${raw.message.slice(0, 180)}…` : raw.message;
+        setError(normalizeSwapError(trimmed));
       } else {
         setError('Swap/Staking flow failed. Please try again.');
       }
@@ -299,10 +381,21 @@ export default function SwapPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-black text-white">Swap</h2>
-        <p className="text-sm text-[#8892a4]">Uniswap-style interface with in-app execution, then continue to pufETH staking.</p>
-      </div>
+      <section className="dex-card rounded-2xl p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.18em] text-[#7f98ba]">DEX Router</p>
+            <h2 className="text-[22px] leading-none font-black text-white mt-1">Swap → Stake</h2>
+          </div>
+          <span className="text-[10px] px-2.5 py-1 rounded-full border border-[#2a3f5d] text-[#9eb4cf] bg-[#0f1a2b]">
+            {isEthInput ? 'Direct' : 'Aggregator'}
+          </span>
+        </div>
+
+        <p className="text-[13px] leading-relaxed text-[#90a8c6]">
+          Route token to ETH, then mint <span className="text-[#6fd7ff] font-semibold">pufETH</span> in one guided flow.
+        </p>
+      </section>
 
       {!address && (
         <button onClick={() => connect()} className="w-full py-3 bg-[#00d4ff] text-[#0a0f1a] font-bold rounded-xl">
@@ -316,7 +409,7 @@ export default function SwapPage() {
         </button>
       )}
 
-      <div className="bg-[#0d1525] border border-[#1a2535] rounded-2xl p-4 space-y-3 card-animate">
+      <div className="dex-card p-4 space-y-3 card-animate">
         <div className="flex items-center justify-between relative">
           <div>
             <p className="text-sm font-semibold text-white">Swap</p>
@@ -329,7 +422,7 @@ export default function SwapPage() {
             ⚙
           </button>
           {showSettings && (
-            <div className="absolute right-0 top-10 z-20 w-48 bg-[#0a0f1a] border border-[#1a2535] rounded-xl p-3 shadow-2xl card-animate">
+            <div className="absolute right-0 top-10 z-20 w-48 bg-[#0f1726] border border-[#2a3a52] rounded-xl p-3 shadow-2xl card-animate">
               <p className="text-xs text-[#8892a4] mb-2">Max slippage</p>
               <div className="flex gap-1 mb-2">
                 {['0.5', '1.0', '2.0'].map((v) => (
@@ -351,9 +444,9 @@ export default function SwapPage() {
           )}
         </div>
 
-        <div className="bg-[#0a0f1a] rounded-xl border border-[#1a2535] p-3 space-y-2">
+        <div className="bg-[#0c1424]/90 rounded-xl border border-[#2a3a52] p-3 space-y-2">
           <div className="flex items-center justify-between">
-            <p className="text-xs text-[#8892a4]">From</p>
+            <p className="text-xs text-[#8ea0bc]">From</p>
             <div className="flex gap-1">
               {TOKENS.map((t) => (
                 <button
@@ -381,9 +474,9 @@ export default function SwapPage() {
           <div className="w-8 h-8 rounded-full bg-[#0a0f1a] border border-[#1a2535] flex items-center justify-center text-[#8892a4]">↓</div>
         </div>
 
-        <div className="bg-[#0a0f1a] rounded-xl border border-[#1a2535] p-3 space-y-2">
+        <div className="bg-[#0c1424]/90 rounded-xl border border-[#2a3a52] p-3 space-y-2">
           <div className="flex items-center justify-between">
-            <p className="text-xs text-[#8892a4]">To (estimated)</p>
+            <p className="text-xs text-[#8ea0bc]">To (estimated)</p>
             <span className="px-2 py-1 rounded-lg bg-[#0d1525] border border-[#1a2535] text-xs text-white flex items-center gap-1">
               <span className="w-4 h-4 rounded-full bg-[#00d4ff] flex items-center justify-center text-[10px] text-[#0a0f1a]">P</span> pufETH
             </span>
@@ -397,7 +490,7 @@ export default function SwapPage() {
           </p>
         </div>
 
-        <div className="bg-[#0a0f1a] border border-[#1a2535] rounded-xl p-3 text-xs text-[#8892a4] space-y-2">
+        <div className="bg-[#0c1424]/90 border border-[#2a3a52] rounded-xl p-3 text-xs text-[#8ea0bc] space-y-2">
           <div className="flex justify-between"><span>Status</span><span className="text-white">{loadingQuote ? 'Fetching quote…' : 'Live quote ready'}</span></div>
           <div className="flex justify-between"><span>Price impact</span><span className="text-[#00ff9d]">{priceImpact}</span></div>
           <div className="flex justify-between"><span>Max slippage</span><span className="text-white">{slippageNumber.toFixed(2)}%</span></div>
@@ -414,12 +507,38 @@ export default function SwapPage() {
           </div>
         </div>
 
+        <div className="bg-[#0c1424]/90 border border-[#2a3a52] rounded-xl p-3 text-xs text-[#8ea0bc] space-y-2">
+          <p className="text-[10px] uppercase tracking-wider text-[#8ea0bc]">Execution Path</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="px-2 py-0.5 rounded-md bg-[#0f1a2b] border border-[#1f324b] text-[#c7d6ea]">{token.symbol}</span>
+            <span>→</span>
+            <span className="px-2 py-0.5 rounded-md bg-[#0f1a2b] border border-[#1f324b] text-[#c7d6ea]">ETH</span>
+            <span>→</span>
+            <span className="px-2 py-0.5 rounded-md bg-[#0f1a2b] border border-[#1f324b] text-[#6fd7ff]">pufETH</span>
+          </div>
+          {swapTxHash && (
+            <a href={`https://etherscan.io/tx/${swapTxHash}`} target="_blank" rel="noopener noreferrer" className="block text-[#61d9ff] underline break-all">
+              Swap tx: {swapTxHash.slice(0, 10)}…{swapTxHash.slice(-6)} ↗
+            </a>
+          )}
+          {stakeTxHash && (
+            <a href={`https://etherscan.io/tx/${stakeTxHash}`} target="_blank" rel="noopener noreferrer" className="block text-[#61d9ff] underline break-all">
+              Stake tx: {stakeTxHash.slice(0, 10)}…{stakeTxHash.slice(-6)} ↗
+            </a>
+          )}
+        </div>
+
+        {insufficientEthForAutoStake && (
+          <p className="text-xs text-amber-300">
+            Auto-stake requires at least {stakeMinRequiredEthLabel || STAKE_GAS_BUFFER_ETH_LABEL} ETH input to cover stake gas + buffer.
+          </p>
+        )}
         {error && <p className="text-xs text-red-400">{error}</p>}
         {status && <p className="text-xs text-[#00d4ff] break-all">{status}</p>}
 
         <button
           onClick={executeSwap}
-          disabled={swapping || !srcAmountBase || !address || !isMainnet}
+          disabled={swapping || !srcAmountBase || !address || !isMainnet || insufficientEthForAutoStake}
           className="w-full text-center py-3 bg-[#00d4ff] text-[#0a0f1a] font-bold rounded-xl cta-animate disabled:opacity-40"
         >
           {swapping ? 'Swapping…' : isEthInput ? 'No Swap Needed (ETH)' : 'Swap'}
@@ -434,7 +553,7 @@ export default function SwapPage() {
       </div>
 
       {recentSwaps.length > 0 && (
-        <div className="bg-[#0d1525] border border-[#1a2535] rounded-2xl p-4 space-y-3">
+        <div className="dex-card p-4 space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-white">Recent Swaps</p>
             <button
@@ -461,8 +580,15 @@ export default function SwapPage() {
         </div>
       )}
 
-      <div className="bg-[#001a2e] border border-[#00d4ff]/20 rounded-xl p-4 text-xs text-[#8892a4]">
-        Advanced challenge status: <span className="text-amber-300">in progress</span>. In-app swap execution is implemented; seamless one-click any-token → pufETH single-flow execution remains the next step.
+      <div className="dex-card rounded-xl p-4 text-xs text-[#8ea0bc] space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <p className="uppercase tracking-wider text-[10px] text-[#8ea0bc]">Advanced challenge</p>
+          <span className="text-[10px] px-2 py-0.5 rounded-full border border-emerald-500/35 text-emerald-300 bg-emerald-500/10">Enabled</span>
+        </div>
+        <p className="text-[#c9d7ea] leading-relaxed">
+          One-click any-token → pufETH via DEX aggregator route (token → ETH) and optional auto-stake (ETH → pufETH).
+        </p>
+        <p className="text-[#8892a4]">Execution depends on route liquidity and available ETH for on-chain gas.</p>
       </div>
     </div>
   );

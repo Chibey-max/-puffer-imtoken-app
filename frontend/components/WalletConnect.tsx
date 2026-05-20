@@ -15,14 +15,14 @@ export default function WalletConnect() {
 
   if (address) {
     return (
-      <div className="flex items-center gap-2">
-        <div className="px-3 py-2 rounded-lg border border-[#1a2535] bg-[#0d1525] leading-tight">
-          <p className="text-xs font-mono text-[#00d4ff]">{truncate(address)}</p>
-          <p className="text-[10px] text-[#8892a4]">{ethBalance ? parseFloat(ethBalance).toFixed(4) : '0.0000'} ETH</p>
+      <div className="flex items-center gap-1.5">
+        <div className="px-2.5 py-1.5 rounded-xl glass-pill leading-tight">
+          <p className="text-[11px] font-mono text-[#8fe7ff]">{truncate(address)}</p>
+          <p className="text-[10px] text-[#8ea0bc]">{ethBalance ? parseFloat(ethBalance).toFixed(4) : '0.0000'} ETH</p>
         </div>
         <button
           onClick={disconnect}
-          className="h-[38px] px-3 text-xs border border-[#2a3545] text-[#8892a4] rounded-lg hover:border-red-500 hover:text-red-400 transition-colors"
+          className="h-[34px] px-2.5 text-[11px] border border-[#2a3a52] text-[#8ea0bc] rounded-xl hover:border-red-500/60 hover:text-red-300 transition-colors glass-pill"
         >
           Disconnect
         </button>
@@ -31,21 +31,21 @@ export default function WalletConnect() {
   }
 
   return (
-    <div className="flex flex-col items-end gap-1.5">
+    <div className="flex flex-col items-end gap-1.5 relative">
       <button
         onClick={() => {
           if (wallets.length > 1) setShowWallets(v => !v);
           else connect(wallets[0]?.id);
         }}
         disabled={isConnecting}
-        className="h-[42px] px-4 bg-[#00d4ff] text-[#0a0f1a] text-sm font-bold rounded-lg cta-animate
-                   hover:bg-[#00b8d9] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        className="h-[36px] px-4 bg-gradient-to-r from-[#39d3ff] to-[#6ea2ff] text-[#06101a] text-xs font-semibold rounded-xl cta-animate
+                   hover:brightness-110 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {isConnecting ? 'Connecting…' : 'Connect Wallet'}
       </button>
 
       {showWallets && wallets.length > 0 && (
-        <div className="w-[220px] bg-[#0d1525] border border-[#1a2535] rounded-xl p-2 space-y-1">
+        <div className="absolute top-10 right-0 w-[210px] rounded-xl p-2 space-y-1 shadow-2xl z-40 glass-pill">
           {wallets.map((w) => (
             <button
               key={w.id}

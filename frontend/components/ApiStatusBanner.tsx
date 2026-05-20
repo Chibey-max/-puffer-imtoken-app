@@ -1,7 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { getApiBase } from '@/lib/apiBase';
 
-const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080/api';
+const API_BASE = getApiBase();
 const HEALTH_URL = `${API_BASE}/health`;
 const POLL_INTERVAL_MS = 20_000;
 const FAILURE_THRESHOLD = 2;
