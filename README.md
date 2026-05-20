@@ -65,13 +65,13 @@ docker compose up --build
 
 | Variable | Service | Description |
 |---|---|---|
-| `NEXT_PUBLIC_BACKEND_URL` | Frontend | Backend API base URL (set this in production; example `https://your-backend.com/api`) |
+| `NEXT_PUBLIC_BACKEND_URL` | Frontend | Optional external backend API base URL (leave unset for Vercel-only mode using built-in `/api` routes) |
 | `NEXT_PUBLIC_RPC_URL` | Frontend | RPC endpoint (default: Holesky public RPC) |
 | `NEXT_PUBLIC_CHAIN_ID` | Frontend | Target chain id (default: `0x4268` Holesky) |
 | `NEXT_PUBLIC_NETWORK_NAME` | Frontend | Target network label (default: `Holesky`) |
 | `NEXT_PUBLIC_SIMULATE_STAKE` | Frontend | Demo-only simulated stake mode (`true/false`) |
 | `NEXT_PUBLIC_SUBMISSION_MODE` | Frontend | Submission mode (`true` disables simulation automatically) |
-| `BACKEND_URL` | Frontend (SSR rewrite) | Internal backend URL for Next.js `/api/*` rewrite |
+| `BACKEND_URL` | Frontend (optional rewrite) | Only set when you want Next.js to proxy `/api/*` to an external backend |
 | `PORT` | Backend | Server port (default 8080) |
 | `FRONTEND_URL` | Backend | CORS allowed origin |
 
@@ -167,23 +167,35 @@ NEXT_PUBLIC_SHOW_SUBMISSION_STATUS=false
 
 ## Deployment (mobile testing)
 
-### Recommended split deploy
-1. Deploy `backend/` to Render/Railway/Fly (Express long-running server).
-2. Deploy `frontend/` to Vercel (Root Directory = `frontend`).
-3. Set frontend env `NEXT_PUBLIC_BACKEND_URL` to your backend `/api` URL.
-4. Set backend env `FRONTEND_URL` to your frontend domain for CORS.
+### Option A: Vercel-only (single deploy)
+This frontend now includes built-in Next.js API routes under `frontend/app/api/*` that replace the Express proxy for deployment.
 
-### Vercel frontend settings
+Vercel settings:
 - Framework: Next.js
 - Root Directory: `frontend`
 - Build command: `npm run build`
 - Output: default Next.js
 
-### Backend minimum env
+Recommended env for Vercel-only mode:
 ```bash
-PORT=8080
-FRONTEND_URL=https://your-frontend.vercel.app
+NEXT_PUBLIC_CHAIN_ID=0x4268
+NEXT_PUBLIC_NETWORK_NAME=Holesky
+NEXT_PUBLIC_RPC_URL=https://ethereum-holesky-rpc.publicnode.com
+NEXT_PUBLIC_SIMULATE_STAKE=false
+NEXT_PUBLIC_SUBMISSION_MODE=true
+NEXT_PUBLIC_SHOW_SUBMISSION_STATUS=false
 ```
+
+Important:
+- Leave `NEXT_PUBLIC_BACKEND_URL` unset in Vercel-only mode.
+- Leave `BACKEND_URL` unset so local `app/api/*` handlers are used.
+- Tx-history API persistence is best-effort in serverless runtime; local wallet history remains available in browser storage.
+
+### Option B: Split deploy (frontend + external backend)
+1. Deploy `backend/` to Render/Railway/Fly.
+2. Deploy `frontend/` to Vercel (Root Directory = `frontend`).
+3. Set `NEXT_PUBLIC_BACKEND_URL` to external backend `/api` URL.
+4. (Optional) Set `BACKEND_URL` if you want Next.js rewrite proxy behavior.
 
 ### Quick mobile validation checklist
 - Open deployed URL on phone/imToken browser.

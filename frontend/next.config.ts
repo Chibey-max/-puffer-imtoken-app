@@ -9,10 +9,11 @@ const nextConfig: NextConfig = {
     optimizePackageImports: ['ethers'],
   },
   async rewrites() {
+    if (!process.env.BACKEND_URL) return [];
     return [
       {
         source: '/api/:path*',
-        destination: `${process.env.BACKEND_URL || 'http://localhost:8080'}/api/:path*`,
+        destination: `${process.env.BACKEND_URL}/api/:path*`,
       },
     ];
   },
