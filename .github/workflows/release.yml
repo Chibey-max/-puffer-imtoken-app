@@ -1,0 +1,30 @@
+name: Release to main
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+jobs:
+  gate:
+    name: Gate check before main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Frontend build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Backend build
+        working-directory: backend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Open PR to main (if on develop)
+        if: github.ref == 'refs/heads/develop'
+        run: |
+          echo "All checks passed. Open a PR to merge develop → main."
