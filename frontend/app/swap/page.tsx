@@ -305,7 +305,7 @@ export default function SwapPage() {
       </div>
 
       {!address && (
-        <button onClick={connect} className="w-full py-3 bg-[#00d4ff] text-[#0a0f1a] font-bold rounded-xl">
+        <button onClick={() => connect()} className="w-full py-3 bg-[#00d4ff] text-[#0a0f1a] font-bold rounded-xl">
           Connect Wallet
         </button>
       )}
