@@ -1,7 +1,10 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
+import { BrowserProvider, Eip1193Provider } from 'ethers';
 import { useWallet } from '@/hooks/useWallet';
 import { getApiBase } from '@/lib/apiBase';
+import { useLocale } from '@/lib/locale';
+import { txExplorerUrl, addressExplorerUrl } from '@/lib/explorer';
 
 type StoredTx = {
   hash: string;
@@ -15,10 +18,39 @@ const TX_STORAGE_KEY = 'puffer_tx_history';
 const API = getApiBase();
 
 export default function HistoryPage() {
-  const { address, pufEthBalance } = useWallet();
+  const { address, pufEthBalance, chainId } = useWallet();
+  const { t } = useLocale();
   const [items, setItems] = useState<StoredTx[]>([]);
 
   useEffect(() => {
+    const reconcileSubmitted = async (txs: StoredTx[]) => {
+      if (typeof window === 'undefined' || !window.ethereum) return txs;
+
+      try {
+        const provider = new BrowserProvider(window.ethereum as Eip1193Provider);
+        let changed = false;
+        const next = await Promise.all(txs.map(async (tx) => {
+          if (tx.status !== 'submitted') return tx;
+          try {
+            const receipt = await provider.getTransactionReceipt(tx.hash);
+            if (!receipt) return tx;
+            changed = true;
+            return { ...tx, status: receipt.status === 1 ? 'confirmed' as const : 'error' as const };
+          } catch {
+            return tx;
+          }
+        }));
+
+        if (changed) {
+          window.localStorage.setItem(TX_STORAGE_KEY, JSON.stringify(next));
+        }
+
+        return next;
+      } catch {
+        return txs;
+      }
+    };
+
     const load = async () => {
       const local: StoredTx[] = (() => {
         if (typeof window === 'undefined') return [];
@@ -32,7 +64,7 @@ export default function HistoryPage() {
       })();
 
       if (!address) {
-        setItems(local);
+        setItems(await reconcileSubmitted(local));
         return;
       }
 
@@ -42,9 +74,10 @@ export default function HistoryPage() {
 
         const byHash = new Map<string, StoredTx>();
         [...local, ...remote].forEach((tx) => byHash.set(tx.hash.toLowerCase(), tx));
-        setItems(Array.from(byHash.values()));
+        const merged = Array.from(byHash.values());
+        setItems(await reconcileSubmitted(merged));
       } catch {
-        setItems(local);
+        setItems(await reconcileSubmitted(local));
       }
     };
 
@@ -59,22 +92,22 @@ export default function HistoryPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-black text-white">History</h2>
-        <p className="text-sm text-[#8892a4]">Your past staking transactions</p>
+        <h2 className="text-xl font-black text-white">{t('History', '历史记录')}</h2>
+        <p className="text-sm text-[#8892a4]">{t('Your past staking transactions', '你的历史质押交易')}</p>
         {address && (
-          <p className="text-xs text-[#00d4ff] mt-1">Current on-chain pufETH balance: {pufEthBalance ? parseFloat(pufEthBalance).toFixed(4) : '—'}</p>
+          <p className="text-xs text-[#00d4ff] mt-1">{t('Current on-chain pufETH balance:', '当前链上 pufETH 余额：')} {pufEthBalance ? parseFloat(pufEthBalance).toFixed(4) : '—'}</p>
         )}
       </div>
 
       {!address ? (
         <div className="text-center py-12 text-[#8892a4] text-sm">
-          Connect your wallet to view transaction history
+          {t('Connect your wallet to view transaction history', '连接钱包以查看交易历史')}
         </div>
       ) : sortedItems.length === 0 ? (
         <div className="text-center py-12">
-          <p className="text-[#8892a4] text-sm mb-2">No transactions yet</p>
+          <p className="text-[#8892a4] text-sm mb-2">{t('No transactions yet', '暂无交易')}</p>
           <p className="text-xs text-[#2a3545]">
-            Your staking activity will appear here after you submit a transaction.
+            {t('Your staking activity will appear here after you submit a transaction.', '提交交易后，你的质押活动将显示在这里。')}
           </p>
         </div>
       ) : (
@@ -83,7 +116,7 @@ export default function HistoryPage() {
             <div key={tx.hash} className="bg-[#0d1525] border border-[#1a2535] rounded-xl p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-white">Stake {tx.token}</p>
+                  <p className="text-sm font-semibold text-white">{t('Stake', '质押')} {tx.token}</p>
                   <p className="text-xs text-[#8892a4]">{parseFloat(tx.amount).toFixed(6)} {tx.token}</p>
                 </div>
                 <span className={`text-xs px-2 py-1 rounded-full ${
@@ -97,12 +130,12 @@ export default function HistoryPage() {
               <div className="mt-3 flex items-center justify-between gap-2">
                 <p className="text-[11px] text-[#8892a4]">{new Date(tx.timestamp).toLocaleString()}</p>
                 <a
-                  href={`https://etherscan.io/tx/${tx.hash}`}
+                  href={txExplorerUrl(tx.hash, chainId)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-xs text-[#00d4ff] underline"
                 >
-                  View tx ↗
+                  {t('View tx ↗', '查看交易 ↗')}
                 </a>
               </div>
             </div>
@@ -112,12 +145,12 @@ export default function HistoryPage() {
 
       {address && (
         <a
-          href={`https://etherscan.io/address/${address}`}
+          href={addressExplorerUrl(address, chainId)}
           target="_blank"
           rel="noopener noreferrer"
           className="block w-full py-3 border border-[#1a2535] rounded-xl text-center text-sm text-[#8892a4] hover:border-[#00d4ff]/30 hover:text-[#00d4ff] transition-colors"
         >
-          View all on Etherscan ↗
+          {t('View all on explorer ↗', '在区块浏览器查看全部 ↗')}
         </a>
       )}
     </div>

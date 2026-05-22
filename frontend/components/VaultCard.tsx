@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { useLocale } from '@/lib/locale';
 
 interface Props {
   id: string;
@@ -12,13 +13,14 @@ interface Props {
 }
 
 export default function VaultCard({ id, name, description, token, color, apy, tvl }: Props) {
+  const { t } = useLocale();
+
   return (
     <div
-      className="bg-[#0d1525] border border-[#1a2535] rounded-2xl p-5 
+      className="bg-[#0d1525] border border-[#1a2535] rounded-2xl p-5
                  hover:border-opacity-60 transition-all hover:-translate-y-0.5 active:translate-y-0"
       style={{ '--accent': color } as React.CSSProperties}
     >
-      {/* Header */}
       <div className="flex items-start justify-between mb-4">
         <div>
           <div
@@ -38,7 +40,6 @@ export default function VaultCard({ id, name, description, token, color, apy, tv
         </div>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div>
           <p className="text-xs text-[#8892a4] mb-0.5">APY</p>
@@ -60,7 +61,7 @@ export default function VaultCard({ id, name, description, token, color, apy, tv
                    hover:opacity-90 active:scale-[0.98]"
         style={{ background: color, color: '#0a0f1a' }}
       >
-        Deposit →
+        {t('Deposit →', '存入 →')}
       </Link>
     </div>
   );

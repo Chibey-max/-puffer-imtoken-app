@@ -84,9 +84,76 @@ export interface VaultTVL {
   [vault: string]: string;
 }
 
+type VaultApyApiResponse = {
+  data?: Array<{
+    token_address?: string;
+    apy?: string | number;
+  }>;
+  timestamp?: string;
+};
+
+type VaultTvlApiResponse = {
+  unifi_eth_vault?: string;
+  unifi_usd_vault?: string;
+  unifi_btc_vault?: string;
+  pufeths_vault?: string;
+};
+
+function normalizeVaultApy(input: VaultApyApiResponse | VaultAPY): VaultAPY {
+  if (input && typeof input === 'object' && !Array.isArray(input) && 'data' in input && Array.isArray(input.data)) {
+    const mapByAddress: Record<string, string> = {
+      '0x196ead472583bc1e9af7a05f860d9857e1bd3dcc': 'unifiETH',
+      '0x82c40e07277ebb92935f79ce92268f80ddc7cab4': 'unifiUSD',
+      '0x170d847a8320f3b6a77ee15b0cae430e3ec933a0': 'unifiBTC',
+      '0x62a4ce0722ee65635c0f8339dd814d549b6f6735': 'pufETHs',
+    };
+
+    const next: VaultAPY = {};
+    input.data.forEach((item) => {
+      const addr = (item.token_address || '').toLowerCase();
+      const id = mapByAddress[addr];
+      if (!id) return;
+      const apy = typeof item.apy === 'number' ? item.apy : Number(item.apy || 0);
+      if (Number.isFinite(apy)) next[id] = apy;
+    });
+    return next;
+  }
+  return input as VaultAPY;
+}
+
+function normalizeVaultTvl(input: VaultTvlApiResponse | VaultTVL): VaultTVL {
+  if (input && typeof input === 'object' && !Array.isArray(input) && ('unifi_eth_vault' in input || 'unifi_usd_vault' in input || 'unifi_btc_vault' in input)) {
+    return {
+      unifiETH: input.unifi_eth_vault || '0',
+      unifiUSD: input.unifi_usd_vault || '0',
+      unifiBTC: input.unifi_btc_vault || '0',
+      pufETHs: input.pufeths_vault || '0',
+    };
+  }
+  return input as VaultTVL;
+}
+
 export interface ProtocolTVL {
   tvl: string;
   stakingApy?: number;
+}
+
+type ProtocolTvlApiResponse = {
+  tvl?: string;
+  stakingApy?: number;
+  tvl_puffer_staking?: string;
+  apy?: string | number;
+};
+
+function normalizeProtocolTvl(input: ProtocolTvlApiResponse | ProtocolTVL): ProtocolTVL {
+  if (input && typeof input === 'object' && ('tvl_puffer_staking' in input || 'apy' in input)) {
+    const apy = typeof input.apy === 'number' ? input.apy : Number(input.apy || 0);
+    return {
+      tvl: input.tvl_puffer_staking || input.tvl || '0',
+      stakingApy: Number.isFinite(apy) ? apy : 0,
+    };
+  }
+  return input as ProtocolTVL;
 }
 
 export function usePufETHRate() {
@@ -159,9 +226,9 @@ export function useVaultsData() {
 
     const load = async () => {
       const [apyRes, tvlRes, protocolRes] = await Promise.allSettled([
-        apiFetch<VaultAPY>('/vaults/apy'),
-        apiFetch<VaultTVL>('/vaults/tvl'),
-        apiFetch<ProtocolTVL>('/protocol/tvl'),
+        apiFetch<VaultApyApiResponse | VaultAPY>('/vaults/apy'),
+        apiFetch<VaultTvlApiResponse | VaultTVL>('/vaults/tvl'),
+        apiFetch<ProtocolTvlApiResponse | ProtocolTVL>('/protocol/tvl'),
       ]);
 
       if (!mounted) return;
@@ -170,22 +237,25 @@ export function useVaultsData() {
       const errors: string[] = [];
 
       if (apyRes.status === 'fulfilled') {
-        setApy(apyRes.value);
-        setCached('vaultApy', { data: apyRes.value, ts: now });
+        const normalized = normalizeVaultApy(apyRes.value);
+        setApy(normalized);
+        setCached('vaultApy', { data: normalized, ts: now });
       } else {
         errors.push(`APY: ${apyRes.reason instanceof Error ? apyRes.reason.message : 'failed'}`);
       }
 
       if (tvlRes.status === 'fulfilled') {
-        setTvl(tvlRes.value);
-        setCached('vaultTvl', { data: tvlRes.value, ts: now });
+        const normalized = normalizeVaultTvl(tvlRes.value);
+        setTvl(normalized);
+        setCached('vaultTvl', { data: normalized, ts: now });
       } else {
         errors.push(`TVL: ${tvlRes.reason instanceof Error ? tvlRes.reason.message : 'failed'}`);
       }
 
       if (protocolRes.status === 'fulfilled') {
-        setProtocolTvl(protocolRes.value);
-        setCached('protocolTvl', { data: protocolRes.value, ts: now });
+        const normalized = normalizeProtocolTvl(protocolRes.value);
+        setProtocolTvl(normalized);
+        setCached('protocolTvl', { data: normalized, ts: now });
       } else {
         errors.push(`Protocol: ${protocolRes.reason instanceof Error ? protocolRes.reason.message : 'failed'}`);
       }

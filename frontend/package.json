@@ -9,7 +9,9 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@consenlabs/tcx-wasm": "^0.8.0",
     "@pufferfinance/puffer-sdk": "^1.31.0",
+    "@walletconnect/ethereum-provider": "^2.21.1",
     "ethers": "^6.16.0",
     "next": "^14.2.23",
     "react": "^18",

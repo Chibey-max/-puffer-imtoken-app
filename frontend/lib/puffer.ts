@@ -6,8 +6,12 @@ let pufferClientInstance: PufferClient | null = null;
 function resolvePufferChain(): Chain {
   if (TARGET_CHAIN_ID.toLowerCase() === '0x1') return Chain.Mainnet;
 
-  const maybeSepolia = (Chain as unknown as Record<string, Chain>).Sepolia;
+  const chainMap = Chain as unknown as Record<string, Chain>;
+  const maybeSepolia = chainMap.Sepolia;
+  const maybeHoodi = chainMap.Hoodi;
+
   if (TARGET_CHAIN_ID.toLowerCase() === '0xaa36a7' && maybeSepolia) return maybeSepolia;
+  if (TARGET_CHAIN_ID.toLowerCase() === '0x88b30' && maybeHoodi) return maybeHoodi;
 
   return Chain.Holesky;
 }

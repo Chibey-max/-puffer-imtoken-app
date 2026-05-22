@@ -71,6 +71,8 @@ docker compose up --build
 | `NEXT_PUBLIC_NETWORK_NAME` | Frontend | Target network label (default: `Holesky`) |
 | `NEXT_PUBLIC_SIMULATE_STAKE` | Frontend | Demo-only simulated stake mode (`true/false`) |
 | `NEXT_PUBLIC_SUBMISSION_MODE` | Frontend | Submission mode (`true` disables simulation automatically) |
+| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | Frontend | WalletConnect/Reown project id (required for universal WC wallet connection) |
+| `NEXT_PUBLIC_TOKENCORE_MODE` | Frontend | Optional switch for Token Core UI surfaces (`true/false`, default `true`) |
 | `BACKEND_URL` | Frontend (optional rewrite) | Only set when you want Next.js to proxy `/api/*` to an external backend |
 | `PORT` | Backend | Server port (default 8080) |
 | `FRONTEND_URL` | Backend | CORS allowed origin |
@@ -87,6 +89,7 @@ docker compose up --build
 | `/vaults/[id]` | Vault detail page |
 | `/swap` | Aggregator quote/swap with optional auto-stake to pufETH |
 | `/security` | Security center + challenge coverage checklist |
+| `/tokencore` | Token Core workspace (tcx-wasm init + keystore/account demo + CLI-style risk mapping) |
 | `/history` | Transaction history (wallet-linked) |
 
 ---
@@ -133,12 +136,23 @@ chore(docker): add health check to backend service
 - ✅ DEX aggregator path implemented on supported routes/networks (`/swap`) with quote → swap execution + optional auto-stake to pufETH
 - ℹ️ Availability depends on network liquidity/aggregator support for the selected token pair
 
+## Token Core Materials Used (official hackathon resources)
+
+| Material | Integration in this project |
+|---|---|
+| `token-core-monorepo` / `tcx-wasm` | Direct runtime integration via `frontend/lib/tokenCore/client.ts` and `frontend/app/tokencore/page.tsx` (`@consenlabs/tcx-wasm`) |
+| Token Core CLI demo semantics | Risk mapping implemented in `frontend/lib/risk/tokenCorePolicy.ts` (policy violation / simulation fail / unknown selector / unverified contract → UI severities) |
+| `token-ui` security materials | Security UX/checklist reflected in `frontend/app/security/page.tsx` and linked references for judges |
+| `token-ui` design guidance | Existing mobile-first wallet UX and risk surfaces follow consistent semantic warning tiers |
+
 ## Security and UX safeguards
 - Network guardrail enforces configured target network with one-tap switch request
 - Graceful backend outage handling (non-blocking live-data warning banner)
 - Transaction state machine: prepare → wallet signature → submitted → confirmed/error
 - Local + backend-persisted transaction history with Etherscan verification links
 - Mobile-first layout tuned for imToken in-app browsing
+- Token Core workspace exposes direct wasm initialization + account derivation demo
+- Token Core CLI-style risk severity mapping (`Info / Warning / Danger / Block`) for pre-sign assessment
 
 ## Demo flow (for judges)
 1. Open app in imToken browser and connect wallet
@@ -160,10 +174,38 @@ NEXT_PUBLIC_RPC_URL=https://ethereum-holesky-rpc.publicnode.com
 NEXT_PUBLIC_SIMULATE_STAKE=false
 NEXT_PUBLIC_SUBMISSION_MODE=true
 NEXT_PUBLIC_SHOW_SUBMISSION_STATUS=false
+NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=41e2bc351481c4efbc367571270bba50
 ```
 
-- `NEXT_PUBLIC_SUBMISSION_MODE=true` automatically disables simulated staking even if `NEXT_PUBLIC_SIMULATE_STAKE=true` by mistake.
-- This ensures real transaction flow on supported networks.
+- `NEXT_PUBLIC_SUBMISSION_MODE=true` disables simulation automatically.
+- This app now also enforces live-only behavior in UI when `NEXT_PUBLIC_SIMULATE_STAKE=true` is detected.
+- Result: no fake/simulated staking confirmations in submission mode.
+
+## Network Capability Matrix (current implementation)
+
+| Network | Stake ETH/stETH/wstETH → pufETH | UniFi Vault Deposit | Any-token one-click (DEX route) |
+|---|---:|---:|---:|
+| Mainnet | ✅ | ✅ | ✅ |
+| Holesky (`0x4268`) | ✅ | ❌ (vault contracts unavailable) | ❌ (aggregator path disabled) |
+| Sepolia (`0xaa36a7`) | ❌ (required staking contracts unavailable) | ❌ | ❌ |
+
+The app now shows a live in-app capability panel and blocks unsupported actions with clear reasons.
+
+## Live-only transaction policy
+
+- Simulation paths are removed from staking execution.
+- Every submitted transaction is a real on-chain transaction and linked to the active chain explorer.
+- Unsupported network flows are blocked before wallet signature prompts.
+- Explorer links are chain-aware:
+  - Mainnet: `etherscan.io`
+  - Holesky: `holesky.etherscan.io`
+  - Sepolia: `sepolia.etherscan.io`
+
+## Hackathon API request contract notes
+
+- `GET /gauges/apr` requires `identifier` query param.
+- `GET /tokens/prices` requires `addresses` query param.
+- For `tokens/prices`, multiple addresses should be joined with `%`.
 
 ## Deployment (mobile testing)
 

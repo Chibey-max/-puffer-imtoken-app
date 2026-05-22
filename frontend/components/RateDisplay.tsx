@@ -1,10 +1,12 @@
 'use client';
 import { usePufETHRate } from '@/hooks/usePufferApi';
+import { useLocale } from '@/lib/locale';
 
 export default function RateDisplay() {
   const { data, loading, updatedAt } = usePufETHRate();
+  const { t, locale } = useLocale();
 
-  const updatedLabel = updatedAt ? new Date(updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
+  const updatedLabel = updatedAt ? new Date(updatedAt).toLocaleTimeString(locale === 'zh' ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit' }) : null;
 
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -33,7 +35,7 @@ export default function RateDisplay() {
         )}
       </div>
       <div className="bg-[#0d1525] border border-[#1a2535] rounded-xl p-4 col-span-2">
-        <p className="text-xs text-[#8892a4] mb-1">Total Staked Assets</p>
+        <p className="text-xs text-[#8892a4] mb-1">{t('Total Staked Assets', '总质押资产')}</p>
         {data ? (
           <p className="text-xl font-mono font-bold text-white">
             {`${parseFloat(data.totalAssets).toLocaleString(undefined, { maximumFractionDigits: 0 })} ETH`}
@@ -43,7 +45,7 @@ export default function RateDisplay() {
         ) : (
           <p className="text-xl font-mono font-bold text-white">—</p>
         )}
-        {updatedLabel && <p className="text-[10px] text-[#8892a4] mt-1">Updated {updatedLabel}</p>}
+        {updatedLabel && <p className="text-[10px] text-[#8892a4] mt-1">{t('Updated', '更新时间')} {updatedLabel}</p>}
       </div>
     </div>
   );

@@ -11,6 +11,11 @@ const DEFAULT_SEPOLIA_RPCS = [
   'https://rpc.sepolia.org',
 ];
 
+const DEFAULT_HOODI_RPCS = [
+  'https://ethereum-hoodi-rpc.publicnode.com',
+  'https://rpc.hoodi.ethpandaops.io',
+];
+
 const envRpcList = (process.env.NEXT_PUBLIC_RPC_URLS || '')
   .split(',')
   .map((s) => s.trim())
@@ -20,7 +25,9 @@ const defaultRpcs = TARGET_CHAIN_ID.toLowerCase() === '0x4268'
   ? DEFAULT_HOLESKY_RPCS
   : TARGET_CHAIN_ID.toLowerCase() === '0xaa36a7'
     ? DEFAULT_SEPOLIA_RPCS
-    : ['https://cloudflare-eth.com'];
+    : TARGET_CHAIN_ID.toLowerCase() === '0x88b30'
+      ? DEFAULT_HOODI_RPCS
+      : ['https://cloudflare-eth.com'];
 
 export const TARGET_RPC_URLS = envRpcList.length > 0
   ? envRpcList
@@ -36,7 +43,7 @@ export const CHAIN_ID_DECIMAL = parseInt(TARGET_CHAIN_ID, 16);
 export function isPufferStakingSupportedChain(chainIdHex: string | null | undefined): boolean {
   if (!chainIdHex) return false;
   const chain = chainIdHex.toLowerCase();
-  return chain === '0x1' || chain === '0x4268';
+  return chain === '0x1' || chain === '0x4268' || chain === '0x88b30';
 }
 
 export function pufferSupportLabel(): 'Available' | 'Experimental' {
